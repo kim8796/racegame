@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=1180, initial-scale=1">
+    <title>Tap Derby</title>
+    <link rel="stylesheet" href="/client/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar" aria-label="Race controls">
+        <div>
+          <p class="eyebrow">PC Web Multiplayer</p>
+          <h1>Tap Derby</h1>
+        </div>
+        <div class="roomBadge" id="roomBadge">No room</div>
+      </section>
+
+      <section class="joinPanel" id="joinPanel">
+        <div class="fieldGroup">
+          <label for="nicknameInput">Nickname</label>
+          <input id="nicknameInput" maxlength="16" autocomplete="nickname" placeholder="Player">
+        </div>
+        <div class="actions">
+          <button id="createButton" type="button">Create Room</button>
+        </div>
+        <div class="joinRow">
+          <div class="fieldGroup">
+            <label for="roomInput">Room Code</label>
+            <input id="roomInput" maxlength="4" autocomplete="off" placeholder="ABCD">
+          </div>
+          <button id="joinButton" type="button">Join</button>
+        </div>
+      </section>
+
+      <section class="statusPanel" aria-live="polite">
+        <div id="statusText">Enter a nickname and create or join a room.</div>
+        <button id="startButton" type="button" disabled>Start Race</button>
+      </section>
+
+      <section class="raceStage" aria-label="Race track">
+        <div class="finishAsset" aria-hidden="true"></div>
+        <div class="countdown" id="countdown" hidden>3</div>
+        <div class="lanes" id="lanes"></div>
+      </section>
+
+      <section class="resultsPanel" id="resultsPanel" hidden>
+        <h2>Results</h2>
+        <ol id="resultsList"></ol>
+      </section>
+    </main>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script type="module" src="/client/main.js"></script>
+  </body>
+</html>
