@@ -25,9 +25,30 @@ test("rooms require two players to start and enforce max capacity", () => {
   assert.equal(game.startRace("s1", 1000).ok, true);
 });
 
-test("space taps change server-owned speed and position", () => {
+test("racers stay still until accepted space taps", () => {
   const game = new RaceGame({
-    generateRoomId: () => "RACE"
+    generateRoomId: () => "IDLE"
+  });
+
+  game.createRoom("p1", "One", 0);
+  game.joinRoom("p2", "IDLE", "Two", 1);
+  game.startRace("p1", 100);
+  game.tick(3100);
+  game.tick(8000);
+
+  const snapshot = game.snapshot(game.getRoom("IDLE"), 8000);
+
+  assert.equal(snapshot.status, "racing");
+  assert.equal(snapshot.players.find((player) => player.id === "p1").position, 0);
+  assert.equal(snapshot.players.find((player) => player.id === "p2").position, 0);
+});
+
+test("space taps advance server-owned position by fixed distance", () => {
+  const game = new RaceGame({
+    generateRoomId: () => "RACE",
+    config: {
+      tapDistance: 40
+    }
   });
 
   game.createRoom("fast", "Fast", 0);
@@ -48,8 +69,9 @@ test("space taps change server-owned speed and position", () => {
   const fast = snapshot.players.find((player) => player.id === "fast");
   const slow = snapshot.players.find((player) => player.id === "slow");
 
-  assert.ok(fast.speed > slow.speed);
-  assert.ok(fast.position > slow.position);
+  assert.equal(fast.acceptedTaps, 8);
+  assert.equal(fast.position, 320);
+  assert.equal(slow.position, 0);
 });
 
 test("unusually fast tap input is rejected by the server", () => {
@@ -79,9 +101,7 @@ test("race finish order is decided on the server", () => {
     generateRoomId: () => "DONE",
     config: {
       trackLength: 15,
-      baseSpeed: 10,
-      tapImpulse: 10,
-      boostDecayPerSecond: 0
+      tapDistance: 15
     }
   });
 

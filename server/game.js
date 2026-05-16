@@ -17,10 +17,7 @@ export const GAME_CONFIG = Object.freeze({
   trackLength: 1000,
   tickMs: 50,
   countdownMs: 3000,
-  baseSpeed: 22,
-  tapImpulse: 18,
-  maxBoostSpeed: 220,
-  boostDecayPerSecond: 55,
+  tapDistance: 28,
   maxTapRatePerSecond: 12,
   minTapIntervalMs: 55,
   maxNicknameLength: 16
@@ -146,10 +143,17 @@ export class RaceGame {
     player.tapWindow.push(now);
     player.lastTapAt = now;
     player.acceptedTaps += 1;
-    player.boostSpeed = Math.min(
-      this.config.maxBoostSpeed,
-      player.boostSpeed + this.config.tapImpulse
+    player.position = Math.min(
+      this.config.trackLength,
+      player.position + this.config.tapDistance
     );
+    player.currentSpeed = 0;
+    room.updatedAt = now;
+
+    if (player.position >= this.config.trackLength) {
+      this.finishPlayer(room, player, now);
+      this.finishIfComplete(room, now);
+    }
 
     return { ok: true, accepted: true };
   }
@@ -188,7 +192,7 @@ export class RaceGame {
     for (const room of this.rooms.values()) {
       const changed = this.tickRoom(room, now);
 
-      if (changed || room.status === "countdown" || room.status === "racing") {
+      if (changed || room.status === "countdown") {
         snapshots.push({ roomId: room.id, state: this.snapshot(room, now) });
       }
     }
@@ -218,6 +222,7 @@ export class RaceGame {
         minPlayers: this.config.minPlayers,
         maxPlayers: this.config.maxPlayers,
         trackLength: this.config.trackLength,
+        tapDistance: this.config.tapDistance,
         tickMs: this.config.tickMs
       },
       canStart: room.status === "lobby" && room.players.size >= this.config.minPlayers,
@@ -263,7 +268,6 @@ export class RaceGame {
       nickname: sanitizeNickname(nickname, this.config.maxNicknameLength),
       color: DEFAULT_COLORS[room.players.size % DEFAULT_COLORS.length],
       position: 0,
-      boostSpeed: 0,
       currentSpeed: 0,
       lastTapAt: Number.NEGATIVE_INFINITY,
       tapWindow: [],
@@ -295,54 +299,7 @@ export class RaceGame {
       return true;
     }
 
-    if (room.status !== "racing") {
-      return false;
-    }
-
-    const deltaMs = Math.max(0, now - room.lastTickAt);
-
-    if (deltaMs === 0) {
-      return false;
-    }
-
-    const deltaSeconds = deltaMs / 1000;
-    room.lastTickAt = now;
-    room.updatedAt = now;
-
-    const finishedThisTick = [];
-
-    for (const player of room.players.values()) {
-      if (player.finished) {
-        continue;
-      }
-
-      const previousPosition = player.position;
-      player.boostSpeed = Math.max(
-        0,
-        player.boostSpeed - this.config.boostDecayPerSecond * deltaSeconds
-      );
-      player.currentSpeed = this.config.baseSpeed + player.boostSpeed;
-      player.position += player.currentSpeed * deltaSeconds;
-
-      if (player.position >= this.config.trackLength) {
-        const traveledThisTick = player.position - previousPosition;
-        const finishRatio =
-          traveledThisTick > 0
-            ? (this.config.trackLength - previousPosition) / traveledThisTick
-            : 1;
-        const finishAt = now - deltaMs + Math.max(0, Math.min(1, finishRatio)) * deltaMs;
-
-        player.position = this.config.trackLength;
-        finishedThisTick.push({ player, finishAt });
-      }
-    }
-
-    finishedThisTick
-      .sort((left, right) => left.finishAt - right.finishAt)
-      .forEach((entry) => this.finishPlayer(room, entry.player, entry.finishAt));
-
-    this.finishIfComplete(room, now);
-    return true;
+    return false;
   }
 
   finishPlayer(room, player, now) {
@@ -386,7 +343,6 @@ export function sanitizeNickname(nickname, maxLength = GAME_CONFIG.maxNicknameLe
 
 function resetPlayerRaceState(player, now) {
   player.position = 0;
-  player.boostSpeed = 0;
   player.currentSpeed = 0;
   player.lastTapAt = Number.NEGATIVE_INFINITY;
   player.tapWindow = [];

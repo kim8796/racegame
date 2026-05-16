@@ -4,8 +4,11 @@ const state = {
   selfId: null,
   roomId: null,
   latest: null,
-  keyHeld: false
+  keyHeld: false,
+  tapCounts: new Map()
 };
+
+const TAU = Math.PI * 2;
 
 const elements = {
   nicknameInput: document.querySelector("#nicknameInput"),
@@ -125,7 +128,7 @@ function renderStatus(serverState) {
   if (serverState.status === "racing") {
     const me = serverState.players.find((player) => player.id === state.selfId);
     elements.statusText.textContent = me
-      ? `Speed ${Math.round(me.speed)} | Taps ${me.acceptedTaps}`
+      ? `Progress ${Math.round(me.progress * 100)}% | Taps ${me.acceptedTaps}`
       : "Race running.";
     return;
   }
@@ -136,37 +139,115 @@ function renderStatus(serverState) {
 }
 
 function renderLanes(serverState) {
-  const maxTravel = 100;
+  const playerCount = Math.max(serverState.players.length, 1);
+  const track = document.createElement("div");
+  const runners = document.createElement("div");
+  const roster = document.createElement("div");
 
-  elements.lanes.replaceChildren(
-    ...serverState.players.map((player) => {
-      const lane = document.createElement("article");
-      lane.className = player.id === state.selfId ? "lane me" : "lane";
+  track.className = "ovalTrack";
+  runners.className = "runnersLayer";
+  roster.className = "raceRoster";
 
-      const meta = document.createElement("div");
-      meta.className = "laneMeta";
+  for (let index = 0; index < Math.max(playerCount, 4); index += 1) {
+    const ring = document.createElement("span");
+    ring.className = "trackRing";
+    ring.style.inset = `${18 + index * 11}px ${30 + index * 16}px`;
+    track.append(ring);
+  }
 
-      const chip = document.createElement("span");
-      chip.className = "colorChip";
-      chip.style.background = player.color;
+  for (const [index, player] of serverState.players.entries()) {
+    const previousTaps = state.tapCounts.get(player.id) ?? player.acceptedTaps;
+    const moved = serverState.status === "racing" && player.acceptedTaps > previousTaps;
+    const point = getOvalPoint(player.progress, index, playerCount);
+    const runner = document.createElement("article");
+    const rosterRow = document.createElement("div");
 
-      const nickname = document.createElement("span");
-      nickname.className = "nickname";
-      nickname.textContent = player.nickname;
+    runner.className = [
+      "runner",
+      player.id === state.selfId ? "me" : "",
+      player.finished ? "finished" : "",
+      moved ? "moving" : ""
+    ].filter(Boolean).join(" ");
+    runner.style.left = `${point.x}%`;
+    runner.style.top = `${point.y}%`;
+    runner.style.setProperty("--heading", `${point.heading}rad`);
 
-      const meters = document.createElement("span");
-      meters.className = "meters";
-      meters.textContent = `${Math.round(player.progress * 100)}%`;
+    const bib = document.createElement("span");
+    bib.className = "runnerBib";
+    bib.textContent = String(index + 1);
 
-      const horse = document.createElement("div");
-      horse.className = player.finished ? "horse finished" : "horse";
-      horse.style.left = `calc(${Math.min(player.progress, 1) * maxTravel}% - ${Math.min(player.progress, 1) * 96}px)`;
+    const horse = createHorseSprite(player);
+    horse.append(bib);
+    runner.append(horse);
+    runners.append(runner);
 
-      meta.append(chip, nickname, meters);
-      lane.append(meta, horse);
-      return lane;
-    })
-  );
+    rosterRow.className = player.id === state.selfId ? "rosterRow me" : "rosterRow";
+
+    const chip = document.createElement("span");
+    chip.className = "colorChip";
+    chip.style.background = player.color;
+
+    const nickname = document.createElement("span");
+    nickname.className = "nickname";
+    nickname.textContent = player.nickname;
+
+    const meters = document.createElement("span");
+    meters.className = "meters";
+    meters.textContent = `${Math.round(player.progress * 100)}%`;
+
+    rosterRow.append(chip, nickname, meters);
+    roster.append(rosterRow);
+    state.tapCounts.set(player.id, player.acceptedTaps);
+  }
+
+  elements.lanes.replaceChildren(track, runners, roster);
+}
+
+function getOvalPoint(progress, laneIndex, playerCount) {
+  const safeProgress = Math.max(0, Math.min(progress, 1));
+  const laneSpacing = playerCount > 6 ? 1.75 : 2.25;
+  const angle = safeProgress * TAU;
+  const radiusX = 43 - laneIndex * laneSpacing;
+  const radiusY = 40 - laneIndex * (laneSpacing * 0.82);
+
+  return {
+    x: 50 + Math.cos(angle) * radiusX,
+    y: 50 + Math.sin(angle) * radiusY,
+    heading: angle + Math.PI / 2
+  };
+}
+
+function createHorseSprite(player) {
+  const sprite = document.createElement("div");
+  sprite.className = "horseSprite";
+  sprite.style.setProperty("--silk", player.color);
+
+  for (const className of [
+    "tail",
+    "backLeg far",
+    "frontLeg far",
+    "body",
+    "neck",
+    "head",
+    "muzzle",
+    "ear back",
+    "ear front",
+    "mane",
+    "saddle",
+    "backLeg",
+    "frontLeg",
+    "riderLeg",
+    "riderBody",
+    "riderHead",
+    "helmet",
+    "goggle"
+  ]) {
+    const part = document.createElement("span");
+    part.className = className;
+    sprite.append(part);
+  }
+
+  return sprite;
 }
 
 function renderResults(serverState) {

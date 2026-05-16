@@ -2,7 +2,7 @@
 
 PC web multiplayer horse-racing MVP built with Node.js, Express, and Socket.IO.
 
-Players create or join a room, wait until at least two players are present, then race by repeatedly pressing `Space`. The browser only sends tap input events. The server owns room state, countdown, speed, position, finish detection, ranking, and tap-rate limiting.
+Players create or join a room, wait until at least two players are present, then race by repeatedly pressing `Space`. Each accepted press moves the horse a fixed distance, and horses do not advance without input. The browser only sends tap input events. The server owns room state, countdown, position, finish detection, ranking, and tap-rate limiting.
 
 ## Requirements
 
@@ -33,7 +33,7 @@ npm start
 
 - 2 to 8 players per room
 - One Node.js server serves the static frontend and Socket.IO real-time game traffic
-- Server-authoritative simulation at a fixed tick rate
+- Server-authoritative countdown and tap movement
 - Countdown before each race
 - `Space` tap input only during the race
 - Server-side anti-spam filtering for unusually fast tap input
@@ -43,7 +43,7 @@ npm start
 
 ## Assets
 
-Pixel-art horse/rider, track, and finish-line assets are included in `public/assets/` and rendered in the race screen. The source sprite sheet was generated with the built-in image generation tool using a chroma-key background, then cropped into project-local PNG assets.
+The race screen renders an oval track and animated horse/rider characters with local CSS so every player can use their assigned color on the jockey silks and saddle cloth. Legacy PNG assets remain in `public/assets/` for future replacement or fallback use.
 
 ## Deployment Candidate
 

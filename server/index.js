@@ -71,9 +71,14 @@ io.on("connection", (socket) => {
 
   socket.on("input:tap", (...args) => {
     const callback = args.find((arg) => typeof arg === "function");
+    const room = game.getRoomBySocket(socket.id);
     const result = game.recordTap(socket.id, Date.now());
 
     acknowledge(callback, result);
+
+    if (room && result.ok) {
+      broadcastRoom(room.id);
+    }
   });
 
   socket.on("disconnect", () => {
