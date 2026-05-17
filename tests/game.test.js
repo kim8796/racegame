@@ -7,22 +7,28 @@ test("nickname sanitization trims, compacts, clips, and falls back", () => {
   assert.equal(sanitizeNickname("   "), "Player");
 });
 
-test("rooms require two players to start and enforce max capacity", () => {
+test("rooms can start with one player and enforce max capacity", () => {
   const game = new RaceGame({
-    generateRoomId: () => "ABCD"
+    generateRoomId: () => "SOLO"
   });
   const created = game.createRoom("s1", "One", 0);
 
   assert.equal(created.ok, true);
-  assert.equal(game.startRace("s1", 100).ok, false);
+  assert.equal(created.state.config.minPlayers, 1);
+  assert.equal(created.state.canStart, true);
+  assert.equal(game.startRace("s1", 100).ok, true);
+
+  const fullGame = new RaceGame({
+    generateRoomId: () => "FULL"
+  });
+  fullGame.createRoom("s1", "One", 0);
 
   for (let index = 2; index <= 8; index += 1) {
-    const joined = game.joinRoom(`s${index}`, "ABCD", `P${index}`, index);
+    const joined = fullGame.joinRoom(`s${index}`, "FULL", `P${index}`, index);
     assert.equal(joined.ok, true);
   }
 
-  assert.equal(game.joinRoom("s9", "ABCD", "P9", 9).ok, false);
-  assert.equal(game.startRace("s1", 1000).ok, true);
+  assert.equal(fullGame.joinRoom("s9", "FULL", "P9", 9).ok, false);
 });
 
 test("racers stay still until accepted space taps", () => {
@@ -106,7 +112,6 @@ test("race finish order is decided on the server", () => {
   });
 
   game.createRoom("winner", "Winner", 0);
-  game.joinRoom("runner", "DONE", "Runner", 0);
   game.startRace("winner", 0);
   game.tick(3000);
   game.recordTap("winner", 3050);

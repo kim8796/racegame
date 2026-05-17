@@ -12,7 +12,7 @@ const DEFAULT_COLORS = [
 const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 export const GAME_CONFIG = Object.freeze({
-  minPlayers: 2,
+  minPlayers: 1,
   maxPlayers: 8,
   trackLength: 1000,
   tickMs: 50,
@@ -95,7 +95,7 @@ export class RaceGame {
     }
 
     if (room.players.size < this.config.minPlayers) {
-      return { ok: false, error: "At least two players are required." };
+      return { ok: false, error: "At least one player is required." };
     }
 
     room.status = "countdown";

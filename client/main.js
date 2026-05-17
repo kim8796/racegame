@@ -112,12 +112,13 @@ function render(serverState) {
 function renderStatus(serverState) {
   const playerCount = serverState.players.length;
   const maxPlayers = serverState.config.maxPlayers;
+  const neededPlayers = Math.max(serverState.config.minPlayers - playerCount, 0);
 
   if (serverState.status === "lobby") {
     elements.statusText.textContent =
-      playerCount >= serverState.config.minPlayers
+      neededPlayers === 0
         ? `${playerCount}/${maxPlayers} players in ${serverState.roomId}.`
-        : `${playerCount}/${maxPlayers} players in ${serverState.roomId}. Waiting for one more.`;
+        : `${playerCount}/${maxPlayers} players in ${serverState.roomId}. Waiting for ${neededPlayers} more.`;
     return;
   }
 
