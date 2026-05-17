@@ -8,7 +8,8 @@ const state = {
   tapCounts: new Map()
 };
 
-const TAU = Math.PI * 2;
+const STADIUM_HALF_STRAIGHT = 24;
+const STADIUM_TURN_X_RATIO = 0.55;
 
 const elements = {
   nicknameInput: document.querySelector("#nicknameInput"),
@@ -151,14 +152,14 @@ function renderLanes(serverState) {
   for (let index = 0; index < Math.max(playerCount, 4); index += 1) {
     const ring = document.createElement("span");
     ring.className = "trackRing";
-    ring.style.inset = `${18 + index * 11}px ${30 + index * 16}px`;
+    ring.style.inset = `${22 + index * 12}px ${52 + index * 18}px`;
     track.append(ring);
   }
 
   for (const [index, player] of serverState.players.entries()) {
     const previousTaps = state.tapCounts.get(player.id) ?? player.acceptedTaps;
     const moved = serverState.status === "racing" && player.acceptedTaps > previousTaps;
-    const point = getOvalPoint(player.progress, index, playerCount);
+    const point = getTrackPoint(player.progress, index, playerCount);
     const runner = document.createElement("article");
     const rosterRow = document.createElement("div");
 
@@ -203,17 +204,76 @@ function renderLanes(serverState) {
   elements.lanes.replaceChildren(track, runners, roster);
 }
 
-function getOvalPoint(progress, laneIndex, playerCount) {
+function getTrackPoint(progress, laneIndex, playerCount) {
   const safeProgress = Math.max(0, Math.min(progress, 1));
-  const laneSpacing = playerCount > 6 ? 1.75 : 2.25;
-  const angle = safeProgress * TAU;
-  const radiusX = 43 - laneIndex * laneSpacing;
-  const radiusY = 40 - laneIndex * (laneSpacing * 0.82);
+  const laneSpacing = playerCount > 6 ? 1.45 : 2.1;
+  const radiusY = 34 - laneIndex * laneSpacing;
+  const radiusX = radiusY * STADIUM_TURN_X_RATIO;
+  const turnLength = Math.PI * Math.sqrt((radiusX * radiusX + radiusY * radiusY) / 2);
+  const quarterTurn = turnLength / 2;
+  const straightLength = STADIUM_HALF_STRAIGHT * 2;
+  const totalLength = turnLength * 2 + straightLength * 2;
+  let distance = safeProgress * totalLength;
 
+  if (distance <= quarterTurn) {
+    return getTurnPoint(
+      50 + STADIUM_HALF_STRAIGHT,
+      (distance / quarterTurn) * (Math.PI / 2),
+      radiusX,
+      radiusY
+    );
+  }
+
+  distance -= quarterTurn;
+
+  if (distance <= straightLength) {
+    const ratio = distance / straightLength;
+
+    return {
+      x: 50 + STADIUM_HALF_STRAIGHT - ratio * straightLength,
+      y: 50 + radiusY,
+      heading: Math.PI
+    };
+  }
+
+  distance -= straightLength;
+
+  if (distance <= turnLength) {
+    return getTurnPoint(
+      50 - STADIUM_HALF_STRAIGHT,
+      Math.PI / 2 + (distance / turnLength) * Math.PI,
+      radiusX,
+      radiusY
+    );
+  }
+
+  distance -= turnLength;
+
+  if (distance <= straightLength) {
+    const ratio = distance / straightLength;
+
+    return {
+      x: 50 - STADIUM_HALF_STRAIGHT + ratio * straightLength,
+      y: 50 - radiusY,
+      heading: 0
+    };
+  }
+
+  distance -= straightLength;
+
+  return getTurnPoint(
+    50 + STADIUM_HALF_STRAIGHT,
+    (Math.PI * 1.5) + (distance / quarterTurn) * (Math.PI / 2),
+    radiusX,
+    radiusY
+  );
+}
+
+function getTurnPoint(centerX, angle, radiusX, radiusY) {
   return {
-    x: 50 + Math.cos(angle) * radiusX,
+    x: centerX + Math.cos(angle) * radiusX,
     y: 50 + Math.sin(angle) * radiusY,
-    heading: angle + Math.PI / 2
+    heading: Math.atan2(Math.cos(angle) * radiusY, -Math.sin(angle) * radiusX)
   };
 }
 
