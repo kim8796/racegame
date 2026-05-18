@@ -43,7 +43,7 @@ npm start
 
 ## Solo MVP Repair Contract
 
-The active product goal is to make `racegame` a polished MVP that is playable by one person. Repair the implementation in small auto-executable product tasks rather than one broad manual-review task.
+This product goal is to make `racegame` a polished MVP that is playable by one person. Repair the implementation in small auto-executable product tasks rather than one broad manual-review task.
 
 ### Executable Task Breakdown
 
@@ -71,6 +71,40 @@ The active product goal is to make `racegame` a polished MVP that is playable by
 
 - A new player can run the app locally, open one desktop browser tab, start a race, finish it, see a result, and restart without opening another tab.
 - Existing multiplayer behavior is preserved unless a later scoped task explicitly changes it.
+- Each task must remain product-only and avoid harness files, backlog files, reports, runs, targets, `.env*`, and deployment state.
+
+## Finish Line and Multi-Lap Repair Contract
+
+The active product goal is to fix the odd finish-line rendering so the marker sits inside the track lanes, and to let players configure more than one lap. Repair the implementation in small auto-executable product tasks with explicit validation.
+
+### Executable Task Breakdown
+
+1. **Lane-bounded finish marker**
+   - Scope: `client/main.js`, `client/styles.css`, `tests/game.test.js`
+   - Replace any malformed or out-of-lane finish visual with a rectangular finish marker positioned from the same oval-track geometry used for player lanes.
+   - Validation: `npm test`, `npm run lint`, manual desktop browser check that the marker stays inside the lane band.
+
+2. **Server-authoritative lap count**
+   - Scope: `server/game.js`, `server/index.js`, `tests/game.test.js`
+   - Add a validated lap count to race start/configuration and calculate finish distance as `trackLength * laps` so racers cannot finish after only one lap when multiple laps are selected.
+   - Validation: `npm test`, `npm run lint`
+
+3. **Lap selection and race feedback**
+   - Scope: `public/index.html`, `client/main.js`, `client/styles.css`
+   - Provide a lobby-only lap selector, send the selected value when starting, disable it during active races, and show current lap/progress while racing.
+   - Validation: `npm test`, `npm run lint`, manual desktop browser check for one-lap and multi-lap races.
+
+4. **Documentation alignment**
+   - Scope: `README.md`
+   - Update MVP notes and local usage after the finish-line and multi-lap implementation lands.
+   - Validation: `git diff -- README.md`
+
+### Done Criteria
+
+- The finish marker is a clean lane-bounded visual inside the oval track, not a distorted circle or an asset floating outside the lanes.
+- Players can select a valid lap count before the race starts, and the selection cannot change mid-race.
+- Multi-lap races require the full configured distance and report lap/progress state to the client.
+- Existing solo and multiplayer race flows remain intact.
 - Each task must remain product-only and avoid harness files, backlog files, reports, runs, targets, `.env*`, and deployment state.
 
 ## Assets

@@ -1,4 +1,5 @@
 import express from "express";
+import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +9,9 @@ import { GAME_CONFIG, RaceGame } from "./game.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
+const clientStylesPath = path.join(rootDir, "client", "styles.css");
 const port = Number.parseInt(process.env.PORT ?? "3000", 10);
+const runtimeGameConfig = getRuntimeGameConfig(process.env);
 
 const app = express();
 const server = http.createServer(app);
@@ -17,8 +20,16 @@ const io = new Server(server, {
     origin: false
   }
 });
-const game = new RaceGame();
+const game = new RaceGame({ config: runtimeGameConfig });
 
+app.get("/client/styles.css", async (_request, response, next) => {
+  try {
+    const css = await fs.readFile(clientStylesPath, "utf8");
+    response.type("text/css").send(`${css}\n${FINISH_LINE_CSS}`);
+  } catch (error) {
+    next(error);
+  }
+});
 app.use("/client", express.static(path.join(rootDir, "client")));
 app.use(express.static(path.join(rootDir, "public")));
 
@@ -58,8 +69,8 @@ io.on("connection", (socket) => {
     acknowledge(callback, result);
   });
 
-  socket.on("room:start", (_payload, callback) => {
-    const result = game.startRace(socket.id);
+  socket.on("room:start", (payload, callback) => {
+    const result = game.startRace(socket.id, Date.now(), payload);
     const room = game.getRoomBySocket(socket.id);
 
     acknowledge(callback, result);
@@ -119,3 +130,17 @@ function acknowledge(callback, payload) {
 function withSelf(state, playerId) {
   return { ...state, selfId: playerId };
 }
+
+function getRuntimeGameConfig(env) {
+  const laps = Number(env.RACE_LAPS);
+
+  return Number.isInteger(laps) ? { laps } : {};
+}
+
+const FINISH_LINE_CSS = `
+.finishAsset {
+  right: 150px;
+  width: 20px;
+  border-radius: 2px;
+}
+`;

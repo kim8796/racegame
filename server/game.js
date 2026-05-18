@@ -22,6 +22,9 @@ export const GAME_CONFIG = Object.freeze({
   maxPlayers: 8,
   soloOpponentCount: 3,
   trackLength: 1000,
+  laps: 1,
+  minLaps: 1,
+  maxLaps: 12,
   tickMs: 50,
   countdownMs: 3000,
   tapDistance: 28,
@@ -34,7 +37,7 @@ export class RaceGame {
   constructor(options = {}) {
     this.rooms = new Map();
     this.socketToRoom = new Map();
-    this.config = { ...GAME_CONFIG, ...options.config };
+    this.config = normalizeConfig({ ...GAME_CONFIG, ...options.config });
     this.generateRoomId = options.generateRoomId ?? (() => createRoomId(this.rooms));
   }
 
@@ -48,6 +51,7 @@ export class RaceGame {
       countdownEndsAt: null,
       startedAt: null,
       finishedAt: null,
+      laps: this.config.laps,
       players: new Map(),
       results: [],
       lastTickAt: now
@@ -90,7 +94,7 @@ export class RaceGame {
     };
   }
 
-  startRace(socketId, now = Date.now()) {
+  startRace(socketId, now = Date.now(), options = {}) {
     const room = this.getRoomBySocket(socketId);
 
     if (!room) {
@@ -103,6 +107,21 @@ export class RaceGame {
 
     if (room.players.size < this.config.minPlayers) {
       return { ok: false, error: "At least one player is required." };
+    }
+
+    const requestedLaps = getRequestedLaps(options);
+
+    if (requestedLaps !== undefined) {
+      const laps = parseLapCount(requestedLaps, this.config);
+
+      if (laps === null) {
+        return {
+          ok: false,
+          error: `Laps must be an integer from ${this.config.minLaps} to ${this.config.maxLaps}.`
+        };
+      }
+
+      room.laps = laps;
     }
 
     this.ensureSoloOpponents(room, now);
@@ -152,14 +171,15 @@ export class RaceGame {
     player.tapWindow.push(now);
     player.lastTapAt = now;
     player.acceptedTaps += 1;
+    const raceDistance = getRaceDistance(room, this.config);
     player.position = Math.min(
-      this.config.trackLength,
+      raceDistance,
       player.position + this.config.tapDistance
     );
     player.currentSpeed = 0;
     room.updatedAt = now;
 
-    if (player.position >= this.config.trackLength) {
+    if (player.position >= raceDistance) {
       this.finishPlayer(room, player, now);
       this.finishIfComplete(room, now);
     }
@@ -223,6 +243,7 @@ export class RaceGame {
       room.status === "countdown" && room.countdownEndsAt
         ? Math.max(0, room.countdownEndsAt - now)
         : 0;
+    const raceDistance = getRaceDistance(room, this.config);
 
     return {
       roomId: room.id,
@@ -231,24 +252,36 @@ export class RaceGame {
         minPlayers: this.config.minPlayers,
         maxPlayers: this.config.maxPlayers,
         trackLength: this.config.trackLength,
+        laps: room.laps,
+        raceDistance,
         tapDistance: this.config.tapDistance,
         tickMs: this.config.tickMs
       },
       canStart: room.status === "lobby" && room.players.size >= this.config.minPlayers,
       countdown: Math.ceil(countdownRemainingMs / 1000),
-      players: [...room.players.values()].map((player) => ({
-        id: player.id,
-        nickname: player.nickname,
-        color: player.color,
-        isBot: player.isBot,
-        position: round(player.position, 2),
-        progress: round(player.position / this.config.trackLength, 4),
-        speed: round(player.currentSpeed, 2),
-        acceptedTaps: player.acceptedTaps,
-        rejectedTaps: player.rejectedTaps,
-        finished: player.finished,
-        rank: player.rank
-      })),
+      players: [...room.players.values()].map((player) => {
+        const progress = getPlayerProgress(player.position, this.config.trackLength, room.laps);
+
+        return {
+          id: player.id,
+          nickname: player.nickname,
+          color: player.color,
+          isBot: player.isBot,
+          position: round(player.position, 2),
+          lap: progress.lap,
+          laps: room.laps,
+          lapPosition: round(progress.lapPosition, 2),
+          progress: progress.lapProgress,
+          lapProgress: progress.lapProgress,
+          overallProgress: progress.overallProgress,
+          raceDistance,
+          speed: round(player.currentSpeed, 2),
+          acceptedTaps: player.acceptedTaps,
+          rejectedTaps: player.rejectedTaps,
+          finished: player.finished,
+          rank: player.rank
+        };
+      }),
       results: room.results.map((result) => ({ ...result }))
     };
   }
@@ -381,12 +414,13 @@ export class RaceGame {
       }
 
       const distance = ((now - activeFrom) / 1000) * player.botSpeedPerSecond;
-      player.position = Math.min(this.config.trackLength, player.position + distance);
+      const raceDistance = getRaceDistance(room, this.config);
+      player.position = Math.min(raceDistance, player.position + distance);
       player.currentSpeed =
-        player.position >= this.config.trackLength ? 0 : player.botSpeedPerSecond;
+        player.position >= raceDistance ? 0 : player.botSpeedPerSecond;
       changed = true;
 
-      if (player.position >= this.config.trackLength) {
+      if (player.position >= raceDistance) {
         this.finishPlayer(room, player, now);
       }
     }
@@ -409,7 +443,7 @@ export class RaceGame {
     player.finished = true;
     player.finishTimeMs = room.startedAt ? now - room.startedAt : 0;
     player.rank = room.results.length + 1;
-    player.position = this.config.trackLength;
+    player.position = getRaceDistance(room, this.config);
     room.results.push({
       playerId: player.id,
       nickname: player.nickname,
@@ -455,6 +489,63 @@ function resetPlayerRaceState(player, now) {
 
 function hasHumanPlayers(room) {
   return [...room.players.values()].some((player) => !player.isBot);
+}
+
+function normalizeConfig(config) {
+  const minLaps = Math.max(1, Math.trunc(Number(config.minLaps)) || GAME_CONFIG.minLaps);
+  const maxLaps = Math.max(minLaps, Math.trunc(Number(config.maxLaps)) || GAME_CONFIG.maxLaps);
+  const laps = parseLapCount(config.laps, { minLaps, maxLaps });
+  const defaultLaps = Math.min(Math.max(GAME_CONFIG.laps, minLaps), maxLaps);
+
+  return {
+    ...config,
+    minLaps,
+    maxLaps,
+    laps: laps ?? defaultLaps
+  };
+}
+
+function getRequestedLaps(options) {
+  if (!options || typeof options !== "object") {
+    return undefined;
+  }
+
+  return options.laps ?? options.lapCount;
+}
+
+function parseLapCount(value, config) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const laps = Number(value);
+
+  if (!Number.isInteger(laps) || laps < config.minLaps || laps > config.maxLaps) {
+    return null;
+  }
+
+  return laps;
+}
+
+function getRaceDistance(room, config) {
+  return config.trackLength * room.laps;
+}
+
+function getPlayerProgress(position, lapLength, laps) {
+  const raceDistance = lapLength * laps;
+  const boundedPosition = Math.max(0, Math.min(position, raceDistance));
+  const finished = boundedPosition >= raceDistance;
+  const lapIndex = finished
+    ? laps - 1
+    : Math.min(Math.floor(boundedPosition / lapLength), laps - 1);
+  const lapPosition = finished ? lapLength : boundedPosition - lapIndex * lapLength;
+
+  return {
+    lap: lapIndex + 1,
+    lapPosition,
+    lapProgress: round(lapPosition / lapLength, 4),
+    overallProgress: round(boundedPosition / raceDistance, 4)
+  };
 }
 
 function createRoomId(existingRooms) {
