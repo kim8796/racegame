@@ -14,6 +14,7 @@ const STADIUM_TURN_X_RATIO = 0.55;
 const elements = {
   nicknameInput: document.querySelector("#nicknameInput"),
   roomInput: document.querySelector("#roomInput"),
+  lapsInput: document.querySelector("#lapsInput"),
   soloButton: document.querySelector("#soloButton"),
   createButton: document.querySelector("#createButton"),
   joinButton: document.querySelector("#joinButton"),
@@ -79,7 +80,7 @@ function createRoom(options = {}) {
 }
 
 function startRace() {
-  socket.emit("room:start", {}, (response) => {
+  socket.emit("room:start", { laps: getSelectedLaps() }, (response) => {
     if (!response.ok) {
       showMessage(response.error);
     }
@@ -128,8 +129,13 @@ function render(serverState) {
   elements.roomBadge.textContent = serverState.roomId ?? "No room";
   elements.startButton.disabled = !serverState.canStart;
   elements.tapButton.disabled = serverState.status !== "racing";
+  elements.lapsInput.disabled = serverState.status !== "lobby";
   elements.countdown.hidden = serverState.status !== "countdown";
   elements.countdown.textContent = String(serverState.countdown || "");
+
+  if (serverState.status !== "lobby") {
+    elements.lapsInput.value = String(serverState.config.laps);
+  }
 
   renderStatus(serverState);
   renderLanes(serverState);
@@ -162,7 +168,7 @@ function renderStatus(serverState) {
   if (serverState.status === "racing") {
     const me = serverState.players.find((player) => player.id === state.selfId);
     elements.statusText.textContent = me
-      ? `Progress ${Math.round(me.progress * 100)}% | Taps ${me.acceptedTaps}`
+      ? `Lap ${me.lap}/${me.laps} | Progress ${Math.round(me.lapProgress * 100)}% | Taps ${me.acceptedTaps}`
       : "Race running.";
     return;
   }
@@ -174,6 +180,7 @@ function renderStatus(serverState) {
 
 function renderLanes(serverState) {
   const playerCount = Math.max(serverState.players.length, 1);
+  const visibleLaneCount = Math.max(playerCount, 4);
   const track = document.createElement("div");
   const runners = document.createElement("div");
   const roster = document.createElement("div");
@@ -182,12 +189,25 @@ function renderLanes(serverState) {
   runners.className = "runnersLayer";
   roster.className = "raceRoster";
 
-  for (let index = 0; index < Math.max(playerCount, 4); index += 1) {
+  const outerFinishPoint = getTrackPoint(0, 0, visibleLaneCount);
+  const innerFinishPoint = getTrackPoint(0, visibleLaneCount - 1, visibleLaneCount);
+  const finishPadding = 2.5;
+  const finishLeft = Math.max(0, innerFinishPoint.x - finishPadding);
+  const finishWidth = outerFinishPoint.x - innerFinishPoint.x + finishPadding * 2;
+
+  track.style.setProperty("--finish-left", `${finishLeft}%`);
+  track.style.setProperty("--finish-width", `${finishWidth}%`);
+
+  for (let index = 0; index < visibleLaneCount; index += 1) {
     const ring = document.createElement("span");
     ring.className = "trackRing";
     ring.style.inset = `${22 + index * 12}px ${52 + index * 18}px`;
     track.append(ring);
   }
+
+  const finishLine = document.createElement("span");
+  finishLine.className = "finishLine";
+  track.append(finishLine);
 
   for (const [index, player] of serverState.players.entries()) {
     const previousTaps = state.tapCounts.get(player.id) ?? player.acceptedTaps;
@@ -227,7 +247,7 @@ function renderLanes(serverState) {
 
     const meters = document.createElement("span");
     meters.className = "meters";
-    meters.textContent = `${Math.round(player.progress * 100)}%`;
+    meters.textContent = formatPlayerProgress(player);
 
     rosterRow.append(chip, nickname, meters);
     roster.append(rosterRow);
@@ -235,6 +255,24 @@ function renderLanes(serverState) {
   }
 
   elements.lanes.replaceChildren(track, runners, roster);
+}
+
+function getSelectedLaps() {
+  const min = Number.parseInt(elements.lapsInput.min, 10) || 1;
+  const max = Number.parseInt(elements.lapsInput.max, 10) || 12;
+  const requestedLaps = Number.parseInt(elements.lapsInput.value, 10);
+  const laps = Number.isInteger(requestedLaps)
+    ? Math.min(Math.max(requestedLaps, min), max)
+    : min;
+
+  elements.lapsInput.value = String(laps);
+  return laps;
+}
+
+function formatPlayerProgress(player) {
+  const lapPrefix = player.laps > 1 ? `L${player.lap}/${player.laps} ` : "";
+
+  return `${lapPrefix}${Math.round(player.lapProgress * 100)}%`;
 }
 
 function getTrackPoint(progress, laneIndex, playerCount) {

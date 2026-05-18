@@ -21,6 +21,10 @@
           <label for="nicknameInput">Nickname</label>
           <input id="nicknameInput" maxlength="16" autocomplete="nickname" placeholder="Player">
         </div>
+        <div class="fieldGroup lapField">
+          <label for="lapsInput">Laps</label>
+          <input id="lapsInput" type="number" min="1" max="12" step="1" value="1" inputmode="numeric">
+        </div>
         <div class="actions">
           <button id="soloButton" type="button">Solo Race</button>
           <button id="createButton" type="button">Create Lobby</button>
@@ -43,7 +47,6 @@
       </section>
 
       <section class="raceStage" aria-label="Race track">
-        <div class="finishAsset" aria-hidden="true"></div>
         <div class="countdown" id="countdown" hidden>3</div>
         <div class="lanes" id="lanes"></div>
       </section>
