@@ -14,9 +14,11 @@ const STADIUM_TURN_X_RATIO = 0.55;
 const elements = {
   nicknameInput: document.querySelector("#nicknameInput"),
   roomInput: document.querySelector("#roomInput"),
+  soloButton: document.querySelector("#soloButton"),
   createButton: document.querySelector("#createButton"),
   joinButton: document.querySelector("#joinButton"),
   startButton: document.querySelector("#startButton"),
+  tapButton: document.querySelector("#tapButton"),
   roomBadge: document.querySelector("#roomBadge"),
   statusText: document.querySelector("#statusText"),
   lanes: document.querySelector("#lanes"),
@@ -25,19 +27,12 @@ const elements = {
   resultsList: document.querySelector("#resultsList")
 };
 
+elements.soloButton.addEventListener("click", () => {
+  createRoom({ autoStart: true });
+});
+
 elements.createButton.addEventListener("click", () => {
-  const nickname = elements.nicknameInput.value;
-
-  socket.emit("room:create", { nickname }, (response) => {
-    if (!response.ok) {
-      showMessage(response.error);
-      return;
-    }
-
-    state.selfId = response.playerId;
-    state.roomId = response.roomId;
-    render(response.state);
-  });
+  createRoom();
 });
 
 elements.joinButton.addEventListener("click", () => {
@@ -57,12 +52,45 @@ elements.joinButton.addEventListener("click", () => {
 });
 
 elements.startButton.addEventListener("click", () => {
+  startRace();
+});
+
+elements.tapButton.addEventListener("click", () => {
+  sendTap();
+});
+
+function createRoom(options = {}) {
+  const nickname = elements.nicknameInput.value;
+
+  socket.emit("room:create", { nickname }, (response) => {
+    if (!response.ok) {
+      showMessage(response.error);
+      return;
+    }
+
+    state.selfId = response.playerId;
+    state.roomId = response.roomId;
+    render(response.state);
+
+    if (options.autoStart) {
+      startRace();
+    }
+  });
+}
+
+function startRace() {
   socket.emit("room:start", {}, (response) => {
     if (!response.ok) {
       showMessage(response.error);
     }
   });
-});
+}
+
+function sendTap() {
+  if (state.latest?.status === "racing") {
+    socket.emit("input:tap");
+  }
+}
 
 document.addEventListener("keydown", (event) => {
   if (event.code !== "Space" || state.keyHeld) {
@@ -72,9 +100,7 @@ document.addEventListener("keydown", (event) => {
   state.keyHeld = true;
   event.preventDefault();
 
-  if (state.latest?.status === "racing") {
-    socket.emit("input:tap");
-  }
+  sendTap();
 });
 
 document.addEventListener("keyup", (event) => {
@@ -101,6 +127,7 @@ function render(serverState) {
   state.roomId = serverState.roomId;
   elements.roomBadge.textContent = serverState.roomId ?? "No room";
   elements.startButton.disabled = !serverState.canStart;
+  elements.tapButton.disabled = serverState.status !== "racing";
   elements.countdown.hidden = serverState.status !== "countdown";
   elements.countdown.textContent = String(serverState.countdown || "");
 
@@ -115,10 +142,15 @@ function renderStatus(serverState) {
   const neededPlayers = Math.max(serverState.config.minPlayers - playerCount, 0);
 
   if (serverState.status === "lobby") {
+    if (neededPlayers === 0 && playerCount === 1) {
+      elements.statusText.textContent = `Ready for a solo race in ${serverState.roomId}.`;
+      return;
+    }
+
     elements.statusText.textContent =
       neededPlayers === 0
-        ? `${playerCount}/${maxPlayers} players in ${serverState.roomId}.`
-        : `${playerCount}/${maxPlayers} players in ${serverState.roomId}. Waiting for ${neededPlayers} more.`;
+        ? `${playerCount}/${maxPlayers} racers in ${serverState.roomId}.`
+        : `${playerCount}/${maxPlayers} racers in ${serverState.roomId}. Waiting for ${neededPlayers} more.`;
     return;
   }
 
