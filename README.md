@@ -41,6 +41,38 @@ npm start
 - No skill system
 - No mobile support
 
+## Solo MVP Repair Contract
+
+The active product goal is to make `racegame` a polished MVP that is playable by one person. Repair the implementation in small auto-executable product tasks rather than one broad manual-review task.
+
+### Executable Task Breakdown
+
+1. **Single-player race entry**
+   - Scope: `server/game.js`, `server/index.js`, `client/main.js`, `public/index.html`
+   - Implement a solo race path that can start from one browser tab without requiring a second human player or room join flow.
+   - Validation: `npm test`, `npm run lint`
+
+2. **Solo opponent or timing objective**
+   - Scope: `server/game.js`, `client/main.js`, `client/styles.css`
+   - Add either CPU-controlled opponents or a clear time-trial objective so a solo player has a finish condition and feedback beyond reaching the line alone.
+   - Validation: `npm test`, `npm run lint`
+
+3. **Complete solo race UX**
+   - Scope: `client/main.js`, `client/styles.css`, `public/index.html`
+   - Ensure the first screen, countdown, racing state, finish state, restart flow, and keyboard controls are understandable from one tab.
+   - Validation: `npm run lint`, manual browser check in one desktop tab
+
+4. **Solo MVP documentation alignment**
+   - Scope: `README.md`
+   - Update local run instructions, MVP scope, and acceptance notes after the solo implementation lands.
+   - Validation: `git diff -- README.md`
+
+### Done Criteria
+
+- A new player can run the app locally, open one desktop browser tab, start a race, finish it, see a result, and restart without opening another tab.
+- Existing multiplayer behavior is preserved unless a later scoped task explicitly changes it.
+- Each task must remain product-only and avoid harness files, backlog files, reports, runs, targets, `.env*`, and deployment state.
+
 ## Assets
 
 The race screen renders an oval track and animated horse/rider characters with local CSS so every player can use their assigned color on the jockey silks and saddle cloth. Legacy PNG assets remain in `public/assets/` for future replacement or fallback use.
