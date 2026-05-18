@@ -11,9 +11,16 @@ const DEFAULT_COLORS = [
 
 const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
+const SOLO_OPPONENT_PROFILES = Object.freeze([
+  { nickname: "Comet", speedPerSecond: 118, startDelayMs: 250 },
+  { nickname: "Blaze", speedPerSecond: 136, startDelayMs: 450 },
+  { nickname: "Rocket", speedPerSecond: 154, startDelayMs: 650 }
+]);
+
 export const GAME_CONFIG = Object.freeze({
   minPlayers: 1,
   maxPlayers: 8,
+  soloOpponentCount: 3,
   trackLength: 1000,
   tickMs: 50,
   countdownMs: 3000,
@@ -98,6 +105,8 @@ export class RaceGame {
       return { ok: false, error: "At least one player is required." };
     }
 
+    this.ensureSoloOpponents(room, now);
+
     room.status = "countdown";
     room.countdownEndsAt = now + this.config.countdownMs;
     room.startedAt = null;
@@ -169,7 +178,7 @@ export class RaceGame {
     this.socketToRoom.delete(socketId);
     room.updatedAt = now;
 
-    if (room.players.size === 0) {
+    if (!hasHumanPlayers(room)) {
       this.rooms.delete(room.id);
       return { roomId: room.id, deleted: true };
     }
@@ -231,6 +240,7 @@ export class RaceGame {
         id: player.id,
         nickname: player.nickname,
         color: player.color,
+        isBot: player.isBot,
         position: round(player.position, 2),
         progress: round(player.position / this.config.trackLength, 4),
         speed: round(player.currentSpeed, 2),
@@ -251,7 +261,7 @@ export class RaceGame {
       existingRoom?.players.delete(socketId);
       this.socketToRoom.delete(socketId);
 
-      if (existingRoom && existingRoom.players.size === 0) {
+      if (existingRoom && !hasHumanPlayers(existingRoom)) {
         this.rooms.delete(existingRoom.id);
       } else if (
         existingRoom &&
@@ -267,6 +277,7 @@ export class RaceGame {
       id: socketId,
       nickname: sanitizeNickname(nickname, this.config.maxNicknameLength),
       color: DEFAULT_COLORS[room.players.size % DEFAULT_COLORS.length],
+      isBot: false,
       position: 0,
       currentSpeed: 0,
       lastTapAt: Number.NEGATIVE_INFINITY,
@@ -299,7 +310,95 @@ export class RaceGame {
       return true;
     }
 
+    if (room.status === "racing") {
+      return this.tickBotOpponents(room, now);
+    }
+
     return false;
+  }
+
+  ensureSoloOpponents(room, now) {
+    const humanPlayers = [...room.players.values()].filter((player) => !player.isBot);
+
+    if (humanPlayers.length !== 1) {
+      return;
+    }
+
+    const availableSlots = Math.max(this.config.maxPlayers - room.players.size, 0);
+    const opponentCount = Math.min(
+      this.config.soloOpponentCount,
+      availableSlots,
+      SOLO_OPPONENT_PROFILES.length
+    );
+
+    for (let index = 0; index < opponentCount; index += 1) {
+      const profile = SOLO_OPPONENT_PROFILES[index];
+      const playerId = `bot:${room.id}:${index + 1}`;
+
+      if (room.players.has(playerId)) {
+        continue;
+      }
+
+      room.players.set(playerId, {
+        id: playerId,
+        nickname: profile.nickname,
+        color: DEFAULT_COLORS[room.players.size % DEFAULT_COLORS.length],
+        isBot: true,
+        botSpeedPerSecond: profile.speedPerSecond,
+        botStartDelayMs: profile.startDelayMs,
+        position: 0,
+        currentSpeed: 0,
+        lastTapAt: Number.NEGATIVE_INFINITY,
+        tapWindow: [],
+        acceptedTaps: 0,
+        rejectedTaps: 0,
+        finished: false,
+        finishTimeMs: null,
+        rank: null,
+        joinedAt: now
+      });
+    }
+  }
+
+  tickBotOpponents(room, now) {
+    if (room.startedAt === null || now <= room.lastTickAt) {
+      return false;
+    }
+
+    let changed = false;
+
+    for (const player of room.players.values()) {
+      if (!player.isBot || player.finished) {
+        continue;
+      }
+
+      const startAt = room.startedAt + player.botStartDelayMs;
+      const activeFrom = Math.max(room.lastTickAt, startAt);
+
+      if (now <= activeFrom) {
+        player.currentSpeed = 0;
+        continue;
+      }
+
+      const distance = ((now - activeFrom) / 1000) * player.botSpeedPerSecond;
+      player.position = Math.min(this.config.trackLength, player.position + distance);
+      player.currentSpeed =
+        player.position >= this.config.trackLength ? 0 : player.botSpeedPerSecond;
+      changed = true;
+
+      if (player.position >= this.config.trackLength) {
+        this.finishPlayer(room, player, now);
+      }
+    }
+
+    room.lastTickAt = now;
+
+    if (changed) {
+      room.updatedAt = now;
+      this.finishIfComplete(room, now);
+    }
+
+    return changed;
   }
 
   finishPlayer(room, player, now) {
@@ -352,6 +451,10 @@ function resetPlayerRaceState(player, now) {
   player.finishTimeMs = null;
   player.rank = null;
   player.readyAt = now;
+}
+
+function hasHumanPlayers(room) {
+  return [...room.players.values()].some((player) => !player.isBot);
 }
 
 function createRoomId(existingRooms) {
