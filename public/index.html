@@ -10,7 +10,7 @@
     <main class="shell">
       <section class="topbar" aria-label="Race controls">
         <div>
-          <p class="eyebrow">PC Web Multiplayer</p>
+          <p class="eyebrow">Solo Arcade Race</p>
           <h1>Tap Derby</h1>
         </div>
         <div class="roomBadge" id="roomBadge">No room</div>
@@ -22,7 +22,8 @@
           <input id="nicknameInput" maxlength="16" autocomplete="nickname" placeholder="Player">
         </div>
         <div class="actions">
-          <button id="createButton" type="button">Create Room</button>
+          <button id="soloButton" type="button">Solo Race</button>
+          <button id="createButton" type="button">Create Lobby</button>
         </div>
         <div class="joinRow">
           <div class="fieldGroup">
@@ -34,8 +35,11 @@
       </section>
 
       <section class="statusPanel" aria-live="polite">
-        <div id="statusText">Enter a nickname and create or join a room.</div>
-        <button id="startButton" type="button" disabled>Start Race</button>
+        <div id="statusText">Enter a nickname and start a solo race.</div>
+        <div class="statusActions">
+          <button id="tapButton" type="button" disabled>Tap</button>
+          <button id="startButton" type="button" disabled>Start Race</button>
+        </div>
       </section>
 
       <section class="raceStage" aria-label="Race track">

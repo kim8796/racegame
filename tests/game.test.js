@@ -31,6 +31,77 @@ test("rooms can start with one player and enforce max capacity", () => {
   assert.equal(fullGame.joinRoom("s9", "FULL", "P9", 9).ok, false);
 });
 
+test("solo races add bot opponents and can finish with one human", () => {
+  const game = new RaceGame({
+    generateRoomId: () => "SOLO",
+    config: {
+      trackLength: 90,
+      tapDistance: 30
+    }
+  });
+
+  const created = game.createRoom("human", "Solo", 0);
+
+  assert.equal(created.state.players.length, 1);
+  assert.equal(created.state.players[0].isBot, false);
+
+  const started = game.startRace("human", 100);
+
+  assert.equal(started.ok, true);
+  assert.equal(started.state.status, "countdown");
+  assert.equal(started.state.players.length, 4);
+  assert.equal(started.state.players.filter((player) => player.isBot).length, 3);
+
+  game.tick(3100);
+
+  for (const tapTime of [3160, 3220, 3280]) {
+    const result = game.recordTap("human", tapTime);
+    assert.equal(result.accepted, true);
+  }
+
+  const racingSnapshot = game.snapshot(game.getRoom("SOLO"), 3280);
+  const human = racingSnapshot.players.find((player) => player.id === "human");
+
+  assert.equal(racingSnapshot.status, "racing");
+  assert.equal(human.finished, true);
+  assert.equal(human.rank, 1);
+  assert.equal(racingSnapshot.results[0].playerId, "human");
+
+  game.tick(12000);
+
+  const finishedSnapshot = game.snapshot(game.getRoom("SOLO"), 12000);
+
+  assert.equal(finishedSnapshot.status, "finished");
+  assert.equal(finishedSnapshot.results.length, 4);
+  assert.deepEqual(
+    finishedSnapshot.results.map((result) => result.rank),
+    [1, 2, 3, 4]
+  );
+});
+
+test("multiplayer races do not create solo bot opponents", () => {
+  const game = new RaceGame({
+    generateRoomId: () => "DUO"
+  });
+
+  game.createRoom("p1", "One", 0);
+  game.joinRoom("p2", "DUO", "Two", 1);
+
+  const started = game.startRace("p1", 100);
+
+  assert.equal(started.ok, true);
+  assert.equal(started.state.players.length, 2);
+  assert.equal(started.state.players.some((player) => player.isBot), false);
+
+  game.tick(3100);
+
+  const racingSnapshot = game.snapshot(game.getRoom("DUO"), 3100);
+
+  assert.equal(racingSnapshot.status, "racing");
+  assert.equal(racingSnapshot.players.length, 2);
+  assert.equal(racingSnapshot.players.some((player) => player.isBot), false);
+});
+
 test("racers stay still until accepted space taps", () => {
   const game = new RaceGame({
     generateRoomId: () => "IDLE"
