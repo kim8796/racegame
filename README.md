@@ -38,7 +38,7 @@ npm start
 - `Space` tap input only during the race
 - Server-side anti-spam filtering for unusually fast tap input
 - Full track view with nickname labels, player positions, local-player highlight, and shared finish results
-- No skill system
+- Horse-type skill system tracked by the scoped repair contract below
 - No mobile support
 
 ## Solo MVP Repair Contract
@@ -105,6 +105,43 @@ The active product goal is to fix the odd finish-line rendering so the marker si
 - Players can select a valid lap count before the race starts, and the selection cannot change mid-race.
 - Multi-lap races require the full configured distance and report lap/progress state to the client.
 - Existing solo and multiplayer race flows remain intact.
+- Each task must remain product-only and avoid harness files, backlog files, reports, runs, targets, `.env*`, and deployment state.
+
+## Horse Types and Skills Repair Contract
+
+The active product goal is to increase strategy by offering four horse types, each with one match-limited special skill triggered by `Left Shift`. Repair the implementation in small auto-executable product tasks with explicit validation.
+
+### Executable Task Breakdown
+
+1. **Server-owned horse type and skill contract**
+   - Scope: `server/game.js`, `server/index.js`, `tests/game.test.js`
+   - Define exactly four selectable or assigned horse types and expose each player's horse type, skill id, skill label, and per-race availability in the server snapshot.
+   - Accept `input:skill` only while racing, reject duplicate use in the same race, and reset skill availability when a new race starts.
+   - Validation: `npm test`, `npm run lint`
+
+2. **Skill effect rules**
+   - Scope: `server/game.js`, `tests/game.test.js`
+   - Implement the four server-authoritative effects: 1.2x speed boost, terrain break that slows other horses by 20% on that terrain, teleport behind the nearest horse ahead, and magnetic repulse that pushes nearby horses away.
+   - Clamp all position changes to the race distance, preserve finish/rank ordering, and cover edge cases where no valid target or nearby horse exists.
+   - Validation: `npm test`, `npm run lint`
+
+3. **Left Shift controls and race feedback**
+   - Scope: `public/index.html`, `client/main.js`, `client/styles.css`
+   - Bind `Left Shift` to skill activation, provide an equivalent on-screen skill control, and render horse type, skill name, availability, used state, and short activation feedback.
+   - Ensure skill UI does not allow use before countdown completion, after finish, or more than once per match.
+   - Validation: `npm run lint`, manual desktop browser check for keyboard and button activation
+
+4. **Documentation alignment**
+   - Scope: `README.md`
+   - Update local controls, MVP scope, and gameplay notes after the four horse types and one-use skills are verified.
+   - Validation: `git diff -- README.md`
+
+### Done Criteria
+
+- A race has exactly four horse types available, and every player has one visible horse type with a distinct skill.
+- `Left Shift` activates the local player's skill during the race, and each player can use that skill at most once per race.
+- The speed boost, terrain slow, teleport draft, and magnetic repulse effects are enforced by server state rather than client-only visuals.
+- Existing solo, multiplayer, lap, finish, restart, and tap-rate behavior remains intact.
 - Each task must remain product-only and avoid harness files, backlog files, reports, runs, targets, `.env*`, and deployment state.
 
 ## Assets
