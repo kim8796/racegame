@@ -5,11 +5,30 @@ const state = {
   roomId: null,
   latest: null,
   keyHeld: false,
+  skillKeyHeld: false,
   tapCounts: new Map()
 };
 
 const STADIUM_HALF_STRAIGHT = 24;
 const STADIUM_TURN_X_RATIO = 0.55;
+const SKILL_META = Object.freeze({
+  "speed-boost": {
+    tag: "1.2x burst",
+    message: "Speed Boost fired."
+  },
+  "terrain-break": {
+    tag: "-20% terrain",
+    message: "Terrain Break placed."
+  },
+  "teleport-draft": {
+    tag: "draft teleport",
+    message: "Teleport Draft fired."
+  },
+  "magnetic-repulse": {
+    tag: "close push",
+    message: "Magnetic Repulse fired."
+  }
+});
 
 const elements = {
   nicknameInput: document.querySelector("#nicknameInput"),
@@ -20,8 +39,10 @@ const elements = {
   joinButton: document.querySelector("#joinButton"),
   startButton: document.querySelector("#startButton"),
   tapButton: document.querySelector("#tapButton"),
+  skillButton: document.querySelector("#skillButton"),
   roomBadge: document.querySelector("#roomBadge"),
   statusText: document.querySelector("#statusText"),
+  horsePanel: document.querySelector("#horsePanel"),
   lanes: document.querySelector("#lanes"),
   countdown: document.querySelector("#countdown"),
   resultsPanel: document.querySelector("#resultsPanel"),
@@ -60,6 +81,10 @@ elements.tapButton.addEventListener("click", () => {
   sendTap();
 });
 
+elements.skillButton?.addEventListener("click", () => {
+  sendSkill();
+});
+
 function createRoom(options = {}) {
   const nickname = elements.nicknameInput.value;
 
@@ -93,20 +118,55 @@ function sendTap() {
   }
 }
 
-document.addEventListener("keydown", (event) => {
-  if (event.code !== "Space" || state.keyHeld) {
+function sendSkill() {
+  if (state.latest?.status !== "racing") {
     return;
   }
 
-  state.keyHeld = true;
-  event.preventDefault();
+  socket.emit("input:skill", {}, (response) => {
+    if (!response?.ok) {
+      showMessage(response?.error ?? "Skill is not available.");
+      return;
+    }
 
-  sendTap();
+    showMessage(getSkillMeta(response.skill).message);
+  });
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.code === "Space") {
+    if (state.keyHeld) {
+      return;
+    }
+
+    state.keyHeld = true;
+    event.preventDefault();
+
+    sendTap();
+    return;
+  }
+
+  if (event.code === "ShiftLeft") {
+    if (state.skillKeyHeld) {
+      return;
+    }
+
+    state.skillKeyHeld = true;
+    event.preventDefault();
+
+    sendSkill();
+  }
 });
 
 document.addEventListener("keyup", (event) => {
   if (event.code === "Space") {
     state.keyHeld = false;
+    event.preventDefault();
+    return;
+  }
+
+  if (event.code === "ShiftLeft") {
+    state.skillKeyHeld = false;
     event.preventDefault();
   }
 });
@@ -125,10 +185,12 @@ socket.on("disconnect", () => {
 
 function render(serverState) {
   state.latest = serverState;
+  state.selfId = serverState.selfId ?? state.selfId;
   state.roomId = serverState.roomId;
   elements.roomBadge.textContent = serverState.roomId ?? "No room";
   elements.startButton.disabled = !serverState.canStart;
   elements.tapButton.disabled = serverState.status !== "racing";
+  renderSkillButton(serverState);
   elements.lapsInput.disabled = serverState.status !== "lobby";
   elements.countdown.hidden = serverState.status !== "countdown";
   elements.countdown.textContent = String(serverState.countdown || "");
@@ -138,18 +200,37 @@ function render(serverState) {
   }
 
   renderStatus(serverState);
+  renderHorsePanel(serverState);
   renderLanes(serverState);
   renderResults(serverState);
+}
+
+function renderSkillButton(serverState) {
+  if (!elements.skillButton) {
+    return;
+  }
+
+  const me = getSelf(serverState);
+  const skill = me?.skill;
+
+  elements.skillButton.disabled = !skill?.available;
+  elements.skillButton.textContent = skill?.used ? "Used" : "Skill";
+  elements.skillButton.title = skill
+    ? `${me.horseTypeName}: ${skill.name} (${getSkillMeta(skill.id).tag}) - Left Shift`
+    : "Use horse skill - Left Shift";
 }
 
 function renderStatus(serverState) {
   const playerCount = serverState.players.length;
   const maxPlayers = serverState.config.maxPlayers;
   const neededPlayers = Math.max(serverState.config.minPlayers - playerCount, 0);
+  const me = getSelf(serverState);
 
   if (serverState.status === "lobby") {
     if (neededPlayers === 0 && playerCount === 1) {
-      elements.statusText.textContent = `Ready for a solo race in ${serverState.roomId}.`;
+      elements.statusText.textContent = me
+        ? `Ready for a solo race in ${serverState.roomId}. ${formatLoadout(me)}.`
+        : `Ready for a solo race in ${serverState.roomId}.`;
       return;
     }
 
@@ -166,9 +247,8 @@ function renderStatus(serverState) {
   }
 
   if (serverState.status === "racing") {
-    const me = serverState.players.find((player) => player.id === state.selfId);
     elements.statusText.textContent = me
-      ? `Lap ${me.lap}/${me.laps} | Progress ${Math.round(me.lapProgress * 100)}% | Taps ${me.acceptedTaps}`
+      ? `Lap ${me.lap}/${me.laps} | Progress ${Math.round(me.lapProgress * 100)}% | Taps ${me.acceptedTaps} | ${formatLoadout(me)} ${formatSkillState(me)}`
       : "Race running.";
     return;
   }
@@ -176,6 +256,47 @@ function renderStatus(serverState) {
   if (serverState.status === "finished") {
     elements.statusText.textContent = "Race finished.";
   }
+}
+
+function renderHorsePanel(serverState) {
+  if (!elements.horsePanel) {
+    return;
+  }
+
+  const horseTypes = serverState.config.horseTypes ?? [];
+  const me = getSelf(serverState);
+  const heading = document.createElement("h2");
+
+  if (horseTypes.length === 0) {
+    elements.horsePanel.replaceChildren();
+    return;
+  }
+
+  heading.textContent = "Horse Types";
+
+  const cards = horseTypes.map((horseType) => {
+    const card = document.createElement("article");
+    const name = document.createElement("strong");
+    const skill = document.createElement("span");
+    const tag = document.createElement("span");
+
+    card.className = [
+      "horseCard",
+      `horse-${horseType.id}`,
+      me?.horseType === horseType.id ? "selected" : ""
+    ].filter(Boolean).join(" ");
+
+    name.textContent = horseType.name;
+    skill.className = "horseSkillName";
+    skill.textContent = horseType.skill.name;
+    tag.className = "skillTag";
+    tag.textContent = getSkillMeta(horseType.skill.id).tag;
+
+    card.append(name, skill, tag);
+    return card;
+  });
+
+  elements.horsePanel.replaceChildren(heading, ...cards);
 }
 
 function renderLanes(serverState) {
@@ -209,6 +330,8 @@ function renderLanes(serverState) {
   finishLine.className = "finishLine";
   track.append(finishLine);
 
+  renderTerrainHazards(serverState, runners, visibleLaneCount);
+
   for (const [index, player] of serverState.players.entries()) {
     const previousTaps = state.tapCounts.get(player.id) ?? player.acceptedTaps;
     const moved = serverState.status === "racing" && player.acceptedTaps > previousTaps;
@@ -218,9 +341,12 @@ function renderLanes(serverState) {
 
     runner.className = [
       "runner",
+      `horse-${player.horseType}`,
       player.id === state.selfId ? "me" : "",
       player.finished ? "finished" : "",
-      moved ? "moving" : ""
+      moved ? "moving" : "",
+      player.skill?.active ? "skillActive" : "",
+      player.skill?.used ? "skillUsed" : ""
     ].filter(Boolean).join(" ");
     runner.style.left = `${point.x}%`;
     runner.style.top = `${point.y}%`;
@@ -249,12 +375,37 @@ function renderLanes(serverState) {
     meters.className = "meters";
     meters.textContent = formatPlayerProgress(player);
 
-    rosterRow.append(chip, nickname, meters);
+    const loadout = document.createElement("span");
+    loadout.className = "loadout";
+    loadout.textContent = `${formatLoadout(player)} ${formatSkillState(player)}`;
+
+    rosterRow.append(chip, nickname, loadout, meters);
     roster.append(rosterRow);
     state.tapCounts.set(player.id, player.acceptedTaps);
   }
 
   elements.lanes.replaceChildren(track, runners, roster);
+}
+
+function renderTerrainHazards(serverState, runners, visibleLaneCount) {
+  const trackLength = serverState.config.trackLength || serverState.config.raceDistance || 1;
+  const hazardLaneIndex = Math.floor((visibleLaneCount - 1) / 2);
+
+  for (const hazard of serverState.terrainHazards ?? []) {
+    const lapPosition = hazard.position >= trackLength
+      ? hazard.position % trackLength
+      : hazard.position;
+    const progress = lapPosition / trackLength;
+    const point = getTrackPoint(progress, hazardLaneIndex, visibleLaneCount);
+    const marker = document.createElement("span");
+
+    marker.className = "terrainHazard";
+    marker.style.left = `${point.x}%`;
+    marker.style.top = `${point.y}%`;
+    marker.style.setProperty("--heading", `${point.heading}rad`);
+    marker.textContent = "-20%";
+    runners.append(marker);
+  }
 }
 
 function getSelectedLaps() {
@@ -350,7 +501,7 @@ function getTurnPoint(centerX, angle, radiusX, radiusY) {
 
 function createHorseSprite(player) {
   const sprite = document.createElement("div");
-  sprite.className = "horseSprite";
+  sprite.className = `horseSprite horse-${player.horseType}`;
   sprite.style.setProperty("--silk", player.color);
 
   for (const className of [
@@ -379,6 +530,29 @@ function createHorseSprite(player) {
   }
 
   return sprite;
+}
+
+function getSelf(serverState) {
+  return serverState.players.find((player) => player.id === state.selfId) ?? null;
+}
+
+function formatLoadout(player) {
+  return `${player.horseTypeName ?? "Horse"}: ${player.skill?.name ?? "Skill"}`;
+}
+
+function formatSkillState(player) {
+  if (player.skill?.active) {
+    return "active";
+  }
+
+  return player.skill?.used ? "used" : "ready";
+}
+
+function getSkillMeta(skillId) {
+  return SKILL_META[skillId] ?? {
+    tag: "one use",
+    message: "Skill fired."
+  };
 }
 
 function renderResults(serverState) {
