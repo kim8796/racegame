@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { RaceGame, sanitizeNickname } from "../server/game.js";
+import { HORSE_TYPES, RaceGame, sanitizeNickname } from "../server/game.js";
 
 test("nickname sanitization trims, compacts, clips, and falls back", () => {
   assert.equal(sanitizeNickname("  Ada   Lovelace  ", 12), "Ada Lovelace");
@@ -273,6 +273,176 @@ test("invalid lap selections are rejected before the race starts", () => {
   }
 });
 
+test("race snapshots expose four horse types with distinct skills", () => {
+  const game = new RaceGame({
+    generateRoomId: () => "TYPE",
+    config: {
+      soloOpponentCount: 0
+    }
+  });
+
+  game.createRoom("p1", "One", 0);
+  game.joinRoom("p2", "TYPE", "Two", 0);
+  game.joinRoom("p3", "TYPE", "Three", 0);
+  game.joinRoom("p4", "TYPE", "Four", 0);
+
+  const snapshot = game.snapshot(game.getRoom("TYPE"), 0);
+
+  assert.equal(snapshot.config.horseTypes.length, 4);
+  assert.deepEqual(
+    snapshot.config.horseTypes.map((horseType) => ({
+      id: horseType.id,
+      skillId: horseType.skill.id
+    })),
+    [
+      { id: "sprinter", skillId: "speed-boost" },
+      { id: "breaker", skillId: "terrain-break" },
+      { id: "shadow", skillId: "teleport-draft" },
+      { id: "magnet", skillId: "magnetic-repulse" }
+    ]
+  );
+  assert.deepEqual(
+    snapshot.players.map((player) => ({
+      horseType: player.horseType,
+      skillId: player.skill.id,
+      available: player.skill.available,
+      used: player.skill.used
+    })),
+    HORSE_TYPES.map((horseType) => ({
+      horseType: horseType.id,
+      skillId: horseType.skill.id,
+      available: false,
+      used: false
+    }))
+  );
+});
+
+test("horse skills apply their race effects and can only be used once", () => {
+  const game = new RaceGame({
+    generateRoomId: () => "SKIL",
+    config: {
+      soloOpponentCount: 0,
+      tapDistance: 100
+    }
+  });
+
+  game.createRoom("sprinter", "Sprinter", 0);
+  game.joinRoom("breaker", "SKIL", "Breaker", 0);
+  game.joinRoom("shadow", "SKIL", "Shadow", 0);
+  game.joinRoom("magnet", "SKIL", "Magnet", 0);
+  game.startRace("sprinter", 0);
+  game.tick(3000);
+
+  const room = game.getRoom("SKIL");
+
+  assert.equal(game.useSkill("sprinter", 3100).ok, true);
+  assert.equal(game.recordTap("sprinter", 3160).accepted, true);
+  assert.equal(playerSnapshot(game, "SKIL", "sprinter", 3160).position, 120);
+  assert.equal(game.useSkill("sprinter", 3200).ok, false);
+
+  room.players.get("breaker").position = 200;
+
+  const terrain = game.useSkill("breaker", 3300);
+
+  assert.equal(terrain.ok, true);
+  assert.deepEqual(terrain.effect, {
+    hazardId: "terrain:breaker:3300",
+    position: 200,
+    radius: 80,
+    slowMultiplier: 0.8
+  });
+
+  room.players.get("shadow").position = 100;
+  assert.equal(game.recordTap("shadow", 3360).accepted, true);
+  assert.equal(playerSnapshot(game, "SKIL", "shadow", 3360).position, 180);
+  assert.equal(game.useSkill("breaker", 3400).ok, false);
+
+  room.players.get("shadow").position = 100;
+  room.players.get("sprinter").position = 50;
+  room.players.get("breaker").position = 260;
+
+  const teleport = game.useSkill("shadow", 3500);
+
+  assert.equal(teleport.ok, true);
+  assert.deepEqual(teleport.effect, {
+    targetId: "breaker",
+    position: 230
+  });
+  assert.equal(game.useSkill("shadow", 3600).ok, false);
+
+  room.players.get("magnet").position = 300;
+  room.players.get("sprinter").position = 250;
+  room.players.get("breaker").position = 340;
+  room.players.get("shadow").position = 430;
+
+  const repulse = game.useSkill("magnet", 3700);
+
+  assert.equal(repulse.ok, true);
+  assert.deepEqual(repulse.effect.movedPlayers, [
+    { playerId: "sprinter", position: 203.33 },
+    { playerId: "breaker", position: 393.33 }
+  ]);
+  assert.equal(playerSnapshot(game, "SKIL", "shadow", 3700).position, 430);
+  assert.equal(game.useSkill("magnet", 3800).ok, false);
+});
+
+test("client emits skill input from left shift without repeating while held", async () => {
+  const harness = setupClientRenderHarness();
+
+  try {
+    await import(`${new URL("../client/main.js", import.meta.url).href}?skill-input-test`);
+
+    const game = new RaceGame({
+      generateRoomId: () => "KEYS",
+      config: {
+        soloOpponentCount: 0
+      }
+    });
+
+    game.createRoom("p1", "One", 0);
+    game.joinRoom("p2", "KEYS", "Two", 0);
+    game.startRace("p1", 0);
+    game.tick(3000);
+
+    harness.socketHandlers.get("state")({
+      ...game.snapshot(game.getRoom("KEYS"), 3000),
+      selfId: "p1"
+    });
+
+    const skillButton = harness.elements.get("#skillButton");
+    const keydown = harness.documentListeners.get("keydown");
+    const keyup = harness.documentListeners.get("keyup");
+    let prevented = 0;
+    const leftShiftEvent = {
+      code: "ShiftLeft",
+      preventDefault() {
+        prevented += 1;
+      }
+    };
+
+    assert.equal(skillButton.disabled, false);
+    assert.match(skillButton.title, /Left Shift/);
+
+    keydown(leftShiftEvent);
+    keydown(leftShiftEvent);
+    assert.deepEqual(
+      harness.emitted.map((entry) => entry.event),
+      ["input:skill"]
+    );
+
+    keyup(leftShiftEvent);
+    keydown(leftShiftEvent);
+
+    assert.deepEqual(
+      harness.emitted.map((entry) => entry.event),
+      ["input:skill", "input:skill"]
+    );
+    assert.equal(prevented, 3);
+  } finally {
+    harness.restore();
+  }
+});
+
 test("client renders a lane-bounded rectangular finish line", async () => {
   const harness = setupClientRenderHarness();
 
@@ -321,8 +491,10 @@ function setupClientRenderHarness() {
       "#joinButton",
       "#startButton",
       "#tapButton",
+      "#skillButton",
       "#roomBadge",
       "#statusText",
+      "#horsePanel",
       "#lanes",
       "#countdown",
       "#resultsPanel",
@@ -330,6 +502,8 @@ function setupClientRenderHarness() {
     ].map((selector) => [selector, createFakeElement()])
   );
   const socketHandlers = new Map();
+  const documentListeners = new Map();
+  const emitted = [];
   const previousDocument = globalThis.document;
   const previousIo = globalThis.io;
 
@@ -338,12 +512,18 @@ function setupClientRenderHarness() {
   elements.get("#lapsInput").value = "1";
 
   globalThis.document = {
-    addEventListener() {},
+    addEventListener(event, handler) {
+      documentListeners.set(event, handler);
+    },
     createElement: (tagName) => createFakeElement(tagName),
     querySelector: (selector) => elements.get(selector) ?? null
   };
   globalThis.io = () => ({
-    emit(_event, _payload, callback) {
+    emit(event, ...args) {
+      const callback = args.find((arg) => typeof arg === "function");
+
+      emitted.push({ event, args });
+
       if (typeof callback === "function") {
         callback({ ok: true });
       }
@@ -354,6 +534,8 @@ function setupClientRenderHarness() {
   });
 
   return {
+    documentListeners,
+    emitted,
     elements,
     socketHandlers,
     restore() {
@@ -361,6 +543,10 @@ function setupClientRenderHarness() {
       restoreGlobal("io", previousIo);
     }
   };
+}
+
+function playerSnapshot(game, roomId, playerId, now) {
+  return game.snapshot(game.getRoom(roomId), now).players.find((player) => player.id === playerId);
 }
 
 function createFakeElement(tagName = "div") {
