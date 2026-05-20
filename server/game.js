@@ -9,6 +9,48 @@ const DEFAULT_COLORS = [
   "#f472b6"
 ];
 
+const SKILL_IDS = Object.freeze({
+  SPEED_BOOST: "speed-boost",
+  TERRAIN_BREAK: "terrain-break",
+  TELEPORT_DRAFT: "teleport-draft",
+  MAGNETIC_REPULSE: "magnetic-repulse"
+});
+
+export const HORSE_TYPES = Object.freeze([
+  {
+    id: "sprinter",
+    name: "Sprinter",
+    skill: {
+      id: SKILL_IDS.SPEED_BOOST,
+      name: "Speed Boost"
+    }
+  },
+  {
+    id: "breaker",
+    name: "Breaker",
+    skill: {
+      id: SKILL_IDS.TERRAIN_BREAK,
+      name: "Terrain Break"
+    }
+  },
+  {
+    id: "shadow",
+    name: "Shadow",
+    skill: {
+      id: SKILL_IDS.TELEPORT_DRAFT,
+      name: "Teleport Draft"
+    }
+  },
+  {
+    id: "magnet",
+    name: "Magnet",
+    skill: {
+      id: SKILL_IDS.MAGNETIC_REPULSE,
+      name: "Magnetic Repulse"
+    }
+  }
+]);
+
 const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 const SOLO_OPPONENT_PROFILES = Object.freeze([
@@ -30,7 +72,14 @@ export const GAME_CONFIG = Object.freeze({
   tapDistance: 28,
   maxTapRatePerSecond: 12,
   minTapIntervalMs: 55,
-  maxNicknameLength: 16
+  maxNicknameLength: 16,
+  skillBoostMultiplier: 1.2,
+  skillBoostDurationMs: 4000,
+  terrainHazardRadius: 80,
+  terrainSlowMultiplier: 0.8,
+  teleportBehindDistance: 30,
+  repulseRadius: 120,
+  repulseDistance: 80
 });
 
 export class RaceGame {
@@ -53,6 +102,7 @@ export class RaceGame {
       finishedAt: null,
       laps: this.config.laps,
       players: new Map(),
+      terrainHazards: [],
       results: [],
       lastTickAt: now
     };
@@ -130,6 +180,7 @@ export class RaceGame {
     room.countdownEndsAt = now + this.config.countdownMs;
     room.startedAt = null;
     room.finishedAt = null;
+    room.terrainHazards = [];
     room.results = [];
     room.lastTickAt = now;
     room.updatedAt = now;
@@ -172,9 +223,17 @@ export class RaceGame {
     player.lastTapAt = now;
     player.acceptedTaps += 1;
     const raceDistance = getRaceDistance(room, this.config);
+    const movementDistance = getSkillAdjustedDistance(
+      room,
+      player,
+      this.config.tapDistance,
+      now,
+      this.config
+    );
+
     player.position = Math.min(
       raceDistance,
-      player.position + this.config.tapDistance
+      player.position + movementDistance
     );
     player.currentSpeed = 0;
     room.updatedAt = now;
@@ -185,6 +244,44 @@ export class RaceGame {
     }
 
     return { ok: true, accepted: true };
+  }
+
+  useSkill(socketId, now = Date.now()) {
+    const room = this.getRoomBySocket(socketId);
+
+    if (!room || room.status !== "racing") {
+      return { ok: false, used: false, error: "Race is not running." };
+    }
+
+    const player = room.players.get(socketId);
+
+    if (!player || player.finished) {
+      return { ok: false, used: false, error: "Player is not racing." };
+    }
+
+    if (player.skillUsed) {
+      return { ok: false, used: false, error: "Skill has already been used this race." };
+    }
+
+    const horseType = getHorseType(player.horseType);
+    const applied = this.applySkill(room, player, horseType.skill.id, now);
+
+    if (!applied.ok) {
+      return applied;
+    }
+
+    player.skillUsed = true;
+    player.skillActivatedAt = now;
+    room.updatedAt = now;
+    this.finishIfComplete(room, now);
+
+    return {
+      ok: true,
+      used: true,
+      horseType: horseType.id,
+      skill: horseType.skill.id,
+      effect: applied.effect
+    };
   }
 
   leave(socketId, now = Date.now()) {
@@ -255,17 +352,35 @@ export class RaceGame {
         laps: room.laps,
         raceDistance,
         tapDistance: this.config.tapDistance,
-        tickMs: this.config.tickMs
+        tickMs: this.config.tickMs,
+        horseTypes: HORSE_TYPES.map(toHorseTypeSnapshot)
       },
       canStart: room.status === "lobby" && room.players.size >= this.config.minPlayers,
       countdown: Math.ceil(countdownRemainingMs / 1000),
+      terrainHazards: (room.terrainHazards ?? []).map((hazard) => ({
+        id: hazard.id,
+        ownerId: hazard.ownerId,
+        position: round(hazard.position, 2),
+        radius: hazard.radius,
+        slowMultiplier: hazard.slowMultiplier
+      })),
       players: [...room.players.values()].map((player) => {
         const progress = getPlayerProgress(player.position, this.config.trackLength, room.laps);
+        const horseType = getHorseType(player.horseType);
 
         return {
           id: player.id,
           nickname: player.nickname,
           color: player.color,
+          horseType: horseType.id,
+          horseTypeName: horseType.name,
+          skill: {
+            ...horseType.skill,
+            used: player.skillUsed,
+            available: room.status === "racing" && !player.finished && !player.skillUsed,
+            active: isSkillActive(room, player, horseType.skill.id, now)
+          },
+          skillUsed: player.skillUsed,
           isBot: player.isBot,
           position: round(player.position, 2),
           lap: progress.lap,
@@ -323,6 +438,7 @@ export class RaceGame {
       joinedAt: now
     };
 
+    applyHorseType(player, room.players.size);
     room.players.set(socketId, player);
     this.socketToRoom.set(socketId, room.id);
     room.updatedAt = now;
@@ -372,7 +488,7 @@ export class RaceGame {
         continue;
       }
 
-      room.players.set(playerId, {
+      const bot = {
         id: playerId,
         nickname: profile.nickname,
         color: DEFAULT_COLORS[room.players.size % DEFAULT_COLORS.length],
@@ -389,7 +505,10 @@ export class RaceGame {
         finishTimeMs: null,
         rank: null,
         joinedAt: now
-      });
+      };
+
+      applyHorseType(bot, room.players.size);
+      room.players.set(playerId, bot);
     }
   }
 
@@ -413,11 +532,19 @@ export class RaceGame {
         continue;
       }
 
-      const distance = ((now - activeFrom) / 1000) * player.botSpeedPerSecond;
+      const elapsedSeconds = (now - activeFrom) / 1000;
+      const baseDistance = elapsedSeconds * player.botSpeedPerSecond;
+      const distance = getSkillAdjustedDistance(
+        room,
+        player,
+        baseDistance,
+        now,
+        this.config
+      );
       const raceDistance = getRaceDistance(room, this.config);
       player.position = Math.min(raceDistance, player.position + distance);
       player.currentSpeed =
-        player.position >= raceDistance ? 0 : player.botSpeedPerSecond;
+        player.position >= raceDistance ? 0 : distance / elapsedSeconds;
       changed = true;
 
       if (player.position >= raceDistance) {
@@ -466,6 +593,145 @@ export class RaceGame {
       room.updatedAt = now;
     }
   }
+
+  applySkill(room, player, skillId, now) {
+    if (skillId === SKILL_IDS.SPEED_BOOST) {
+      player.speedBoostUntil = now + this.config.skillBoostDurationMs;
+
+      return {
+        ok: true,
+        effect: {
+          multiplier: this.config.skillBoostMultiplier,
+          endsAt: player.speedBoostUntil
+        }
+      };
+    }
+
+    if (skillId === SKILL_IDS.TERRAIN_BREAK) {
+      const hazard = {
+        id: `terrain:${player.id}:${now}`,
+        ownerId: player.id,
+        position: player.position,
+        radius: this.config.terrainHazardRadius,
+        slowMultiplier: this.config.terrainSlowMultiplier,
+        createdAt: now
+      };
+
+      room.terrainHazards.push(hazard);
+
+      return {
+        ok: true,
+        effect: {
+          hazardId: hazard.id,
+          position: round(hazard.position, 2),
+          radius: hazard.radius,
+          slowMultiplier: hazard.slowMultiplier
+        }
+      };
+    }
+
+    if (skillId === SKILL_IDS.TELEPORT_DRAFT) {
+      return this.applyTeleportDraft(room, player, now);
+    }
+
+    if (skillId === SKILL_IDS.MAGNETIC_REPULSE) {
+      return this.applyMagneticRepulse(room, player, now);
+    }
+
+    return { ok: false, used: false, error: "Unknown skill." };
+  }
+
+  applyTeleportDraft(room, player, now) {
+    const target = [...room.players.values()]
+      .filter((other) => other.id !== player.id && other.position > player.position)
+      .sort((left, right) => left.position - right.position)[0];
+
+    if (!target) {
+      return { ok: false, used: false, reason: "no-target", error: "No racer is ahead." };
+    }
+
+    const nextPosition = Math.max(
+      player.position,
+      target.position - this.config.teleportBehindDistance
+    );
+
+    if (nextPosition <= player.position) {
+      return {
+        ok: false,
+        used: false,
+        reason: "target-too-close",
+        error: "The racer ahead is already within teleport range."
+      };
+    }
+
+    const raceDistance = getRaceDistance(room, this.config);
+    player.position = Math.min(nextPosition, raceDistance);
+    player.currentSpeed = 0;
+
+    if (player.position >= raceDistance) {
+      this.finishPlayer(room, player, now);
+    }
+
+    return {
+      ok: true,
+      effect: {
+        targetId: target.id,
+        position: round(player.position, 2)
+      }
+    };
+  }
+
+  applyMagneticRepulse(room, player, now) {
+    const raceDistance = getRaceDistance(room, this.config);
+    const movedPlayers = [];
+
+    for (const other of room.players.values()) {
+      if (other.id === player.id || other.finished) {
+        continue;
+      }
+
+      const distanceFromPlayer = other.position - player.position;
+      const absoluteDistance = Math.abs(distanceFromPlayer);
+
+      if (absoluteDistance >= this.config.repulseRadius) {
+        continue;
+      }
+
+      const direction = distanceFromPlayer >= 0 ? 1 : -1;
+      const forceRatio = 1 - absoluteDistance / this.config.repulseRadius;
+      const pushDistance = this.config.repulseDistance * forceRatio;
+      other.position = Math.max(
+        0,
+        Math.min(raceDistance, other.position + direction * pushDistance)
+      );
+      other.currentSpeed = 0;
+
+      if (other.position >= raceDistance) {
+        this.finishPlayer(room, other, now);
+      }
+
+      movedPlayers.push({
+        playerId: other.id,
+        position: round(other.position, 2)
+      });
+    }
+
+    if (movedPlayers.length === 0) {
+      return {
+        ok: false,
+        used: false,
+        reason: "no-nearby-racers",
+        error: "No nearby racers to repel."
+      };
+    }
+
+    return {
+      ok: true,
+      effect: {
+        movedPlayers
+      }
+    };
+  }
 }
 
 export function sanitizeNickname(nickname, maxLength = GAME_CONFIG.maxNicknameLength) {
@@ -481,6 +747,9 @@ function resetPlayerRaceState(player, now) {
   player.tapWindow = [];
   player.acceptedTaps = 0;
   player.rejectedTaps = 0;
+  player.skillUsed = false;
+  player.skillActivatedAt = null;
+  player.speedBoostUntil = null;
   player.finished = false;
   player.finishTimeMs = null;
   player.rank = null;
@@ -529,6 +798,67 @@ function parseLapCount(value, config) {
 
 function getRaceDistance(room, config) {
   return config.trackLength * room.laps;
+}
+
+function applyHorseType(player, playerIndex) {
+  const horseType = HORSE_TYPES[playerIndex % HORSE_TYPES.length];
+  player.horseType = horseType.id;
+  player.skillUsed = false;
+  player.skillActivatedAt = null;
+  player.speedBoostUntil = null;
+}
+
+function getHorseType(horseTypeId) {
+  return HORSE_TYPES.find((horseType) => horseType.id === horseTypeId) ?? HORSE_TYPES[0];
+}
+
+function toHorseTypeSnapshot(horseType) {
+  return {
+    id: horseType.id,
+    name: horseType.name,
+    skill: { ...horseType.skill }
+  };
+}
+
+function isSkillActive(room, player, skillId, now) {
+  if (skillId === SKILL_IDS.SPEED_BOOST) {
+    return Boolean(player.speedBoostUntil && player.speedBoostUntil > now);
+  }
+
+  if (skillId === SKILL_IDS.TERRAIN_BREAK) {
+    return (room.terrainHazards ?? []).some((hazard) => hazard.ownerId === player.id);
+  }
+
+  return false;
+}
+
+function getSkillAdjustedDistance(room, player, baseDistance, now, config) {
+  const boostedDistance = baseDistance * getSpeedBoostMultiplier(player, now, config);
+
+  if (isSlowedByTerrain(room, player, player.position, player.position + boostedDistance)) {
+    return boostedDistance * config.terrainSlowMultiplier;
+  }
+
+  return boostedDistance;
+}
+
+function getSpeedBoostMultiplier(player, now, config) {
+  return player.speedBoostUntil && player.speedBoostUntil > now
+    ? config.skillBoostMultiplier
+    : 1;
+}
+
+function isSlowedByTerrain(room, player, fromPosition, toPosition) {
+  const start = Math.min(fromPosition, toPosition);
+  const end = Math.max(fromPosition, toPosition);
+
+  return (room.terrainHazards ?? []).some((hazard) => {
+    if (hazard.ownerId === player.id) {
+      return false;
+    }
+
+    return end >= hazard.position - hazard.radius && start <= hazard.position + hazard.radius;
+  });
 }
 
 function getPlayerProgress(position, lapLength, laps) {
