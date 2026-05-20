@@ -144,6 +144,41 @@ The active product goal is to increase strategy by offering four horse types, ea
 - Existing solo, multiplayer, lap, finish, restart, and tap-rate behavior remains intact.
 - Each task must remain product-only and avoid harness files, backlog files, reports, runs, targets, `.env*`, and deployment state.
 
+## Bright Visuals and Help Menu Repair Contract
+
+The active product goal is to brighten the race map, horse/rider characters, and game interface, and to keep a top-right `?` help affordance that explains controls and horse skills. Repair the implementation in small auto-executable product tasks with explicit validation.
+
+### Executable Task Breakdown
+
+1. **Light visual theme and readable race map**
+   - Scope: `client/styles.css`, `tests/game.test.js`
+   - Convert the page, panels, race stage, lane field, rails, and primary controls to a bright light palette with clear lane boundaries.
+   - Add CSS-level assertions for light color scheme and minimum brightness on the body, race map, inner field, and controls.
+   - Validation: `npm test`, `npm run lint`, manual desktop browser check that the map reads as bright without losing lane/finish visibility.
+
+2. **Bright horse and rider sprites**
+   - Scope: `client/styles.css`, `client/main.js`, `tests/game.test.js`
+   - Update the local CSS horse/rider colors for all four horse types so coats, tack, jockey silks, labels, selected state, active skill state, and finished state stay visible on the brighter map.
+   - Validation: `npm test`, `npm run lint`
+
+3. **Top-right help menu with skill instructions**
+   - Scope: `public/index.html`, `client/styles.css`, `client/main.js`, `tests/game.test.js`
+   - Add or preserve a topbar action area with a right-aligned circular `?` control, an accessible help panel, and concise instructions for `Space`, `Left Shift`, the Skill button, and each horse skill effect.
+   - Validation: `npm test`, `npm run lint`, manual desktop browser check that the help menu opens from the top-right and does not cover core race controls incoherently.
+
+4. **Documentation alignment**
+   - Scope: `README.md`
+   - Update local controls, gameplay notes, and MVP scope after the bright theme and help menu implementation lands.
+   - Validation: `git diff -- README.md`
+
+### Done Criteria
+
+- The game uses a light visual theme, and the interface, race map, and lane field no longer read as dark.
+- Every horse/rider variant remains bright, distinct, and readable against the track.
+- The topbar has a right-side circular `?` help control with instructions for tapping, skill activation, and the four skill effects.
+- Existing solo, multiplayer, lap, finish, restart, skill, and tap-rate behavior remains intact.
+- Each task must remain product-only and avoid harness files, backlog files, reports, runs, targets, `.env*`, and deployment state.
+
 ## Assets
 
 The race screen renders an oval track and animated horse/rider characters with local CSS so every player can use their assigned color on the jockey silks and saddle cloth. Legacy PNG assets remain in `public/assets/` for future replacement or fallback use.
