@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { HORSE_TYPES, RaceGame, sanitizeNickname } from "../server/game.js";
 
@@ -480,6 +481,74 @@ test("client renders a lane-bounded rectangular finish line", async () => {
   }
 });
 
+test("visual theme keeps the interface, race map, and horses bright", () => {
+  const styles = readProductFile("../client/styles.css");
+  const rootVariables = getCssBlock(styles, ":root");
+  const bodyColors = extractHexColors(getCssDeclaration(getCssBlock(styles, "body"), "background"));
+  const raceStageColors = extractHexColors(getCssDeclaration(getCssBlock(styles, ".raceStage"), "background"));
+  const innerFieldColors = extractHexColors(getCssDeclaration(getCssBlock(styles, ".ovalTrack::before"), "background"));
+  const buttonColors = extractHexColors(getCssDeclaration(getCssBlock(styles, "button"), "background"));
+  const horseSelectors = [
+    ".horseSprite",
+    ".horseSprite.horse-sprinter",
+    ".horseSprite.horse-breaker",
+    ".horseSprite.horse-shadow",
+    ".horseSprite.horse-magnet"
+  ];
+
+  assert.equal(getCssVariable(rootVariables, "color-scheme"), "light");
+
+  for (const variableName of ["--bg", "--panel", "--panel-strong", "--rail"]) {
+    assertBrightColor(getCssVariable(rootVariables, variableName), 0.9, variableName);
+  }
+
+  for (const color of bodyColors) {
+    assertBrightColor(color, 0.9, "body background");
+  }
+
+  for (const color of [...raceStageColors, ...innerFieldColors]) {
+    assertBrightColor(color, 0.66, "race grass");
+  }
+
+  assert.ok(
+    buttonColors.some((color) => perceivedBrightness(color) >= 0.78),
+    "primary buttons should use a bright visible fill"
+  );
+
+  for (const selector of horseSelectors) {
+    const horseBlock = getCssBlock(styles, selector);
+
+    assertBrightColor(getCssVariable(horseBlock, "--coat-main"), 0.55, `${selector} main coat`);
+    assertBrightColor(getCssVariable(horseBlock, "--coat-light"), 0.72, `${selector} light coat`);
+  }
+});
+
+test("topbar keeps a right-side question-mark help menu with skill instructions", () => {
+  const html = readProductFile("../public/index.html");
+  const styles = readProductFile("../client/styles.css");
+  const topbarActions = html.match(/<div class="topbarActions">[\s\S]*?<details class="helpMenu">[\s\S]*?<\/details>\s*<\/div>/);
+
+  assert.ok(topbarActions, "topbar actions should contain the help menu");
+  assert.match(topbarActions[0], /<summary aria-label="Game help" title="Game help">\?<\/summary>/);
+
+  for (const text of [
+    "Press Space",
+    "Press Left Shift",
+    "Skill button",
+    "Speed Boost",
+    "Terrain Break",
+    "Teleport Draft",
+    "Magnetic Repulse"
+  ]) {
+    assert.match(topbarActions[0], new RegExp(escapeRegExp(text)));
+  }
+
+  assert.match(getCssBlock(styles, ".topbar"), /justify-content:\s*space-between;/);
+  assert.match(getCssBlock(styles, ".topbarActions"), /position:\s*relative;/);
+  assert.match(getCssBlock(styles, ".helpMenu summary"), /border-radius:\s*50%;/);
+  assert.match(getCssBlock(styles, ".helpPanel"), /right:\s*0;/);
+});
+
 function setupClientRenderHarness() {
   const elements = new Map(
     [
@@ -590,6 +659,60 @@ function createFakeStyle() {
 function parsePercent(value) {
   assert.match(value, /^-?\d+(?:\.\d+)?%$/);
   return Number.parseFloat(value);
+}
+
+function readProductFile(path) {
+  return readFileSync(new URL(path, import.meta.url), "utf8");
+}
+
+function getCssBlock(styles, selector) {
+  const escapedSelector = escapeRegExp(selector);
+  const blockPattern = new RegExp(`(?:^|})\\s*${escapedSelector}\\s*\\{([^}]*)\\}`, "g");
+  const matches = [...styles.matchAll(blockPattern)];
+
+  assert.ok(matches.length > 0, `Missing CSS block for ${selector}`);
+  return matches.at(-1)[1];
+}
+
+function getCssVariable(block, variableName) {
+  return getCssDeclaration(block, variableName);
+}
+
+function getCssDeclaration(block, propertyName) {
+  const propertyPattern = new RegExp(`${escapeRegExp(propertyName)}:\\s*([^;]+);`);
+  const match = block.match(propertyPattern);
+
+  assert.ok(match, `Missing CSS declaration ${propertyName}`);
+  return match[1].trim();
+}
+
+function extractHexColors(source) {
+  return [...source.matchAll(/#[\da-fA-F]{6}\b/g)].map(([color]) => color.toLowerCase());
+}
+
+function assertBrightColor(color, minimumBrightness, label) {
+  assert.ok(
+    perceivedBrightness(color) >= minimumBrightness,
+    `${label} should stay bright: ${color}`
+  );
+}
+
+function perceivedBrightness(hexColor) {
+  assert.match(hexColor, /^#[\da-fA-F]{6}$/);
+
+  const red = Number.parseInt(hexColor.slice(1, 3), 16);
+  const green = Number.parseInt(hexColor.slice(3, 5), 16);
+  const blue = Number.parseInt(hexColor.slice(5, 7), 16);
+
+  return Math.sqrt(
+    (red * red * 0.299) +
+    (green * green * 0.587) +
+    (blue * blue * 0.114)
+  ) / 255;
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function restoreGlobal(name, value) {
